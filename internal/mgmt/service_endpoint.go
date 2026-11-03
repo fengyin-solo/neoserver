@@ -1,6 +1,7 @@
 package mgmt
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -37,13 +38,15 @@ func parsePostGISEndpoint(raw json.RawMessage) (postgisEndpoint, bool) {
 // service already has, or use one listed in Datasource.DatabaseHosts. File and
 // remote sources are governed by Datasource.AllowedPaths instead.
 //
-// previous is the stored connection info, or nil for a new service. It writes
-// a 403 and returns false when the caller may not use the endpoint.
-func (h *handler) authorizeServiceEndpoint(w http.ResponseWriter, r *http.Request, serviceType store.ServiceType, previous, candidate json.RawMessage) bool {
+// serviceEndpointAllowed reports whether the caller may use candidate as a
+// PostGIS endpoint. It is transport-neutral so that batch checks can apply the
+// same rule without writing per-item HTTP errors. previous is the stored
+// connection info, or nil for a new service.
+func (h *handler) serviceEndpointAllowed(ctx context.Context, serviceType store.ServiceType, previous, candidate json.RawMessage) bool {
 	if serviceType != store.ServiceTypePostGIS {
 		return true
 	}
-	if caller, ok := identity.FromContext(r.Context()); ok && caller.IsSuperAdmin() {
+	if caller, ok := identity.FromContext(ctx); ok && caller.IsSuperAdmin() {
 		return true
 	}
 	target, ok := parsePostGISEndpoint(candidate)
@@ -56,7 +59,13 @@ func (h *handler) authorizeServiceEndpoint(w http.ResponseWriter, r *http.Reques
 			return true
 		}
 	}
-	if databaseHostAllowed(h.cfg.Datasource.DatabaseHosts, target) {
+	return databaseHostAllowed(h.cfg.Datasource.DatabaseHosts, target)
+}
+
+// authorizeServiceEndpoint writes a 403 and returns false when the caller may
+// not use the endpoint.
+func (h *handler) authorizeServiceEndpoint(w http.ResponseWriter, r *http.Request, serviceType store.ServiceType, previous, candidate json.RawMessage) bool {
+	if h.serviceEndpointAllowed(r.Context(), serviceType, previous, candidate) {
 		return true
 	}
 	writeError(w, http.StatusForbidden, "Forbidden",

@@ -414,6 +414,28 @@
         ],
         "type": "object"
       },
+      "BatchConnectionTestInput": {
+        "properties": {
+          "services": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "timeout_ms": {
+            "default": 10000,
+            "maximum": 30000,
+            "minimum": 100,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "services"
+        ],
+        "type": "object"
+      },
       "BrowserSession": {
         "properties": {
           "auth_method": {
@@ -1129,6 +1151,46 @@
         "required": [
           "ok",
           "duration_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectionTestResult": {
+        "properties": {
+          "duration_ms": {
+            "type": "number"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "service_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_id",
+          "name",
+          "ok",
+          "duration_ms"
+        ],
+        "type": "object"
+      },
+      "ConnectionTestResults": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionTestResult"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
         ],
         "type": "object"
       },
@@ -12795,6 +12857,130 @@
           }
         },
         "summary": "Test a service connection before saving",
+        "tags": [
+          "Services"
+        ]
+      }
+    },
+    "/workspaces/{workspace}/services/test-connections": {
+      "post": {
+        "description": "Checks up to 100 stored services concurrently, with at most 8 checks running at a time. Duplicate service names are de-duplicated by first occurrence, and results keep the request order. Unknown names and failed checks are returned as failed result items instead of failing the whole request. Each check applies the same PostGIS host rule and managed-import binding validation as the single test-connection endpoint, and responses never include connection credentials.",
+        "operationId": "testServiceConnections",
+        "parameters": [
+          {
+            "description": "Workspace ID",
+            "in": "path",
+            "name": "workspace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchConnectionTestInput"
+              }
+            }
+          },
+          "description": "Services to check",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResults"
+                }
+              }
+            },
+            "description": "Connection test results in request order"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Workspace not found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Request body exceeds the configured limit"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "HTTPS required"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Request rate exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Service temporarily unavailable"
+          }
+        },
+        "summary": "Test multiple existing service connections",
         "tags": [
           "Services"
         ]

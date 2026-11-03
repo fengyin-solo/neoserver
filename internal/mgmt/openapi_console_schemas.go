@@ -1,6 +1,8 @@
 package mgmt
 
 import (
+	"time"
+
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/tobilg/neoserver/internal/protocolrequest"
 )
@@ -197,6 +199,16 @@ func getConsoleSchemas() openapi3.Schemas {
 	browserSessionList := schemaObject(openapi3.Schemas{"sessions": schemaArray("BrowserSession")}, "sessions")
 
 	connectionTest := schemaObject(openapi3.Schemas{"ok": boolValue(), "duration_ms": floatValue(), "message": stringValue()}, "ok", "duration_ms")
+	batchConnectionTestInput := schemaObject(openapi3.Schemas{
+		"services":   {Value: openapi3.NewArraySchema().WithItems(openapi3.NewStringSchema()).WithMinItems(1).WithMaxItems(batchConnectionTestMaxServices)},
+		"timeout_ms": {Value: openapi3.NewIntegerSchema().WithMin(float64(connectionTestMinTimeout / time.Millisecond)).WithMax(float64(connectionTestMaxTimeout / time.Millisecond)).WithDefault(float64(connectionTestDefaultTimeout / time.Millisecond))},
+	}, "services")
+	connectionTestResult := schemaObject(openapi3.Schemas{
+		"service_id": stringValue(), "name": stringValue(), "ok": boolValue(), "duration_ms": floatValue(), "message": stringValue(),
+	}, "service_id", "name", "ok", "duration_ms")
+	connectionTestResults := schemaObject(openapi3.Schemas{
+		"results": {Value: &openapi3.Schema{Type: &openapi3.Types{"array"}, Items: schemaRef("ConnectionTestResult")}},
+	}, "results")
 	connectionInfo := schemaObject(openapi3.Schemas{
 		"host": stringValue(), "port": {Value: openapi3.NewIntegerSchema()}, "database": stringValue(), "user": stringValue(),
 		"password": stringValue(), "sslmode": stringValue(), "schema": stringValue(), "path": stringValue(), "url": stringValue(),
@@ -241,7 +253,9 @@ func getConsoleSchemas() openapi3.Schemas {
 		"TileMatrixSetDefinitions": tileMatrixSetDefinitions, "LoginRequest": loginRequest, "AuthWorkspace": authWorkspace,
 		"AuthSession": authSession, "AuthMe": authMe, "OIDCConsoleConfig": oidcConfig, "AuthConsoleConfig": authConfig,
 		"ConsoleConfig": consoleConfig, "BrowserSession": browserSession, "BrowserSessionList": browserSessionList,
-		"ConnectionTest": connectionTest, "WorkspaceCounts": workspaceCounts, "WorkspaceSummary": workspaceSummary,
+		"ConnectionTest": connectionTest, "BatchConnectionTestInput": batchConnectionTestInput,
+		"ConnectionTestResult": connectionTestResult, "ConnectionTestResults": connectionTestResults,
+		"WorkspaceCounts": workspaceCounts, "WorkspaceSummary": workspaceSummary,
 		"ConnectionInfo": connectionInfo, "CoverageInfo": coverageInfo, "DiscoveredCoverage": discoveredCoverage,
 		"CoverageDiscoveryList": coverageDiscoveryList, "CoverageList": coverageList,
 		"DeletionList": deletionList, "TileZoomProgress": zoomProgress, "TileJobProgress": tileJobProgress,

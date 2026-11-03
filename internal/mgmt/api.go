@@ -183,6 +183,7 @@ func RegisterRoutes(r chi.Router, deps Dependencies) {
 					r.Get("/", h.listServices)
 					r.Post("/", h.createService)
 					r.Post("/test-connection", h.testNewServiceConnection)
+					r.Post("/test-connections", h.testServiceConnections)
 
 					r.Route("/{service}", func(r chi.Router) {
 						r.Get("/", h.getService)

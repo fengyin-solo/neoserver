@@ -190,6 +190,21 @@ func getPaths(params PathParams) *openapi3.Paths {
 		Description: "Applies the same PostGIS host rule as service creation.",
 		RequestBody: jsonBody("Service connection", schemaRef("ServiceConnectionInput")), Responses: mkResponses(map[string]*openapi3.ResponseRef{"200": jsonResp("Connection test result", schemaRef("ConnectionTest")), "403": errResp(403, "Forbidden")}),
 	}})
+	paths.Set("/workspaces/{workspace}/services/test-connections", &openapi3.PathItem{Post: &openapi3.Operation{
+		Tags:        []string{"Services"},
+		Summary:     "Test multiple existing service connections",
+		OperationID: "testServiceConnections",
+		Parameters:  openapi3.Parameters{params.Workspace},
+		Description: "Checks up to 100 stored services concurrently, with at most 8 checks running at a time. Duplicate service names are de-duplicated by first occurrence, and results keep the request order. Unknown names and failed checks are returned as failed result items instead of failing the whole request. Each check applies the same PostGIS host rule and managed-import binding validation as the single test-connection endpoint, and responses never include connection credentials.",
+		RequestBody: jsonBody("Services to check", schemaRef("BatchConnectionTestInput")),
+		Responses: mkResponses(map[string]*openapi3.ResponseRef{
+			"200": jsonResp("Connection test results in request order", schemaRef("ConnectionTestResults")),
+			"400": errResp(400, "Bad Request"),
+			"401": errResp(401, "Unauthorized"),
+			"403": errResp(403, "Forbidden"),
+			"404": errResp(404, "Workspace not found"),
+		}),
+	}})
 
 	paths.Set("/workspaces/{workspace}/services/{service}", &openapi3.PathItem{
 		Get: &openapi3.Operation{
