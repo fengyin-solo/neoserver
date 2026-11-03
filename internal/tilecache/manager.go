@@ -373,6 +373,50 @@ func (m *Manager) Stats(ctx context.Context, workspaceID, resourceID string, wor
 	return stats, nil
 }
 
+const (
+	// DefaultResourceUsageLimit is applied when callers do not request a limit.
+	DefaultResourceUsageLimit = 100
+	// MaxResourceUsageLimit bounds the per-resource usage response.
+	MaxResourceUsageLimit = 1000
+)
+
+// ResourceUsage aggregates the cache footprint of every non-empty resource in
+// workspaceID with a single metadata scan; it never queries resources one by
+// one and never mutates cache contents. Per-resource quotas from
+// resourceQuotas fall back to workspaceQuota and then to the global cache
+// quota. Rows are ordered bytes descending, resource ID ascending, and at
+// most limit rows are returned. The report distinguishes the returned row
+// count from the total number of non-empty resources.
+func (m *Manager) ResourceUsage(ctx context.Context, workspaceID string, workspaceQuota int64, resourceQuotas map[string]int64, limit int) (ResourceUsageReport, error) {
+	if workspaceID == "" {
+		return ResourceUsageReport{}, errors.New("workspace id required")
+	}
+	if limit < 1 || limit > MaxResourceUsageLimit {
+		return ResourceUsageReport{}, fmt.Errorf("resource usage limit must be between 1 and %d", MaxResourceUsageLimit)
+	}
+	resources, total, err := m.index.resourceUsage(ctx, workspaceID, limit)
+	if err != nil {
+		return ResourceUsageReport{}, normalizeMetadataError(err)
+	}
+	for idx := range resources {
+		quota := resourceQuotas[resources[idx].ResourceID]
+		if quota <= 0 {
+			quota = workspaceQuota
+		}
+		if quota <= 0 {
+			quota = m.config.MaxBytes
+		}
+		applyQuota(&resources[idx].Usage, quota)
+	}
+	return ResourceUsageReport{
+		WorkspaceID:       workspaceID,
+		Resources:         resources,
+		TotalResources:    total,
+		ReturnedResources: len(resources),
+		Limit:             limit,
+	}, nil
+}
+
 func applyQuota(usage *Usage, quota int64) {
 	usage.QuotaBytes = quota
 	usage.RemainingBytes = max(0, quota-usage.SizeBytes)
@@ -426,6 +470,9 @@ func (m *Manager) beginMutation() (func(), error) {
 
 // JobStore returns the durable job repository owned by this cache database.
 func (m *Manager) JobStore() JobStore { return m.jobs }
+
+// BackendName reports the configured blob backend identifier.
+func (m *Manager) BackendName() string { return m.backend.Name() }
 
 // LifecycleStats reports persistent state owned by a workspace or by a set of
 // resource IDs. It is used by catalog dependency reports without exposing the

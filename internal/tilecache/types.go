@@ -139,6 +139,23 @@ type Stats struct {
 	OrphansRepaired  int64  `json:"orphans_repaired"`
 }
 
+// ResourceUsage is the cache footprint of one resource inside a workspace.
+type ResourceUsage struct {
+	ResourceID string `json:"resource_id"`
+	Usage
+}
+
+// ResourceUsageReport is the aggregated per-resource footprint of one
+// workspace. TotalResources counts every non-empty resource before Limit is
+// applied, while ReturnedResources counts the rows carried in Resources.
+type ResourceUsageReport struct {
+	WorkspaceID       string          `json:"workspace_id"`
+	Resources         []ResourceUsage `json:"resources"`
+	TotalResources    int             `json:"total_resources"`
+	ReturnedResources int             `json:"returned_resources"`
+	Limit             int             `json:"limit"`
+}
+
 type Selector struct {
 	WorkspaceID string
 	ResourceID  string

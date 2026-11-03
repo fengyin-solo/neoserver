@@ -5049,6 +5049,117 @@
         ],
         "type": "object"
       },
+      "TileCacheResourceStats": {
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "group_by": {
+            "enum": [
+              "resource"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "resources": {
+            "items": {
+              "properties": {
+                "entry_count": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "quota_bytes": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "remaining_bytes": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "resource_id": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                "utilization": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "resource_id",
+                "size_bytes",
+                "entry_count",
+                "quota_bytes",
+                "remaining_bytes",
+                "utilization"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "returned_resources": {
+            "type": "integer"
+          },
+          "total_resources": {
+            "type": "integer"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "group_by",
+          "workspace_id",
+          "resources",
+          "total_resources",
+          "returned_resources",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "TileCacheResourceUsage": {
+        "properties": {
+          "entry_count": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "quota_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remaining_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "utilization": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "resource_id",
+          "size_bytes",
+          "entry_count",
+          "quota_bytes",
+          "remaining_bytes",
+          "utilization"
+        ],
+        "type": "object"
+      },
       "TileCacheStats": {
         "properties": {
           "backend": {
@@ -21092,6 +21203,36 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Resource public identifier; cannot be combined with group_by=resource",
+            "in": "query",
+            "name": "resource",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Aggregate usage by resource within the workspace",
+            "in": "query",
+            "name": "group_by",
+            "schema": {
+              "enum": [
+                "resource"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum resources to return when group_by=resource (1-1000, default 100)",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -21099,11 +21240,28 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TileCacheStats"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TileCacheStats"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TileCacheResourceStats"
+                    }
+                  ]
                 }
               }
             },
             "description": "Persistent tile cache statistics"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Invalid query parameters"
           },
           "401": {
             "content": {

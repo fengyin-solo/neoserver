@@ -26,6 +26,7 @@ type mockStore struct {
 	roles         map[string]*store.Role
 	claimMappings map[string]*store.ClaimRoleMapping
 	wmtsSettings  map[string]store.WMTSSettings
+	ogcTilesQuota int64
 }
 
 func newMockStore() *mockStore {
@@ -161,18 +162,19 @@ func (m *mockStore) DeleteService(ctx context.Context, id string) error {
 // Layer operations
 func (m *mockStore) CreateLayer(ctx context.Context, input store.CreateLayerInput) (*store.Layer, error) {
 	layer := &store.Layer{
-		ID:            "layer-" + input.PublicID,
-		ServiceID:     input.ServiceID,
-		PublicID:      input.PublicID,
-		SourceLayer:   input.SourceLayer,
-		IsSQLView:     input.IsSQLView,
-		SQLViewConfig: input.SQLViewConfig,
-		Title:         input.Title,
-		Description:   input.Description,
-		Enabled:       input.Enabled,
-		CRSDefault:    input.CRSDefault,
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		ID:                  "layer-" + input.PublicID,
+		ServiceID:           input.ServiceID,
+		PublicID:            input.PublicID,
+		SourceLayer:         input.SourceLayer,
+		IsSQLView:           input.IsSQLView,
+		SQLViewConfig:       input.SQLViewConfig,
+		Title:               input.Title,
+		Description:         input.Description,
+		Enabled:             input.Enabled,
+		CRSDefault:          input.CRSDefault,
+		TileCacheQuotaBytes: input.TileCacheQuotaBytes,
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 	m.layers[layer.ID] = layer
 	return layer, nil
@@ -335,7 +337,7 @@ func (m *mockStore) UpdateOGCAPISettings(ctx context.Context, workspaceID string
 	return nil
 }
 func (m *mockStore) GetOGCTilesAPISettings(ctx context.Context, workspaceID string) (*store.OGCTilesAPISettings, error) {
-	return &store.OGCTilesAPISettings{}, nil
+	return &store.OGCTilesAPISettings{Settings: store.OGCTilesAPIInnerSettings{PersistentCacheQuotaBytes: m.ogcTilesQuota}}, nil
 }
 func (m *mockStore) UpdateOGCTilesAPISettings(ctx context.Context, workspaceID string, settings store.OGCTilesAPISettings) error {
 	return nil

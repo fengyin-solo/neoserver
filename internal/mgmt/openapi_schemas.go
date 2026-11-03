@@ -514,6 +514,20 @@ func getSchemas() openapi3.Schemas {
 		"evictions": {Value: openapi3.NewInt64Schema()}, "bytes_evicted": {Value: openapi3.NewInt64Schema()},
 		"oversized_skipped": {Value: openapi3.NewInt64Schema()}, "orphans_repaired": {Value: openapi3.NewInt64Schema()},
 	}}}
+	tileCacheResourceUsageSchema := &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}, Properties: openapi3.Schemas{
+		"resource_id": {Value: openapi3.NewStringSchema()},
+		"size_bytes":  {Value: openapi3.NewInt64Schema()}, "entry_count": {Value: openapi3.NewInt64Schema()},
+		"quota_bytes": {Value: openapi3.NewInt64Schema()}, "remaining_bytes": {Value: openapi3.NewInt64Schema()},
+		"utilization": {Value: openapi3.NewFloat64Schema()},
+	}, Required: []string{"resource_id", "size_bytes", "entry_count", "quota_bytes", "remaining_bytes", "utilization"}}}
+	tileCacheResourceStatsSchema := &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}, Properties: openapi3.Schemas{
+		"enabled": {Value: openapi3.NewBoolSchema()}, "backend": {Value: openapi3.NewStringSchema()},
+		"group_by":        {Value: openapi3.NewStringSchema().WithEnum("resource")},
+		"workspace_id":    {Value: openapi3.NewStringSchema()},
+		"resources":       {Value: &openapi3.Schema{Type: &openapi3.Types{"array"}, Items: tileCacheResourceUsageSchema}},
+		"total_resources": {Value: openapi3.NewIntegerSchema()}, "returned_resources": {Value: openapi3.NewIntegerSchema()},
+		"limit": {Value: openapi3.NewIntegerSchema()},
+	}, Required: []string{"enabled", "group_by", "workspace_id", "resources", "total_resources", "returned_resources", "limit"}}}
 	mosaicGranuleSchema := &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}, Properties: openapi3.Schemas{
 		"id": {Value: openapi3.NewStringSchema()}, "workspace_id": {Value: openapi3.NewStringSchema()}, "service_id": {Value: openapi3.NewStringSchema()},
 		"generation": {Value: openapi3.NewInt64Schema()}, "source_uri": {Value: openapi3.NewStringSchema()}, "crs": {Value: openapi3.NewStringSchema()},
@@ -621,6 +635,8 @@ func getSchemas() openapi3.Schemas {
 		"TileCacheJob":           tileCacheJobSchema,
 		"TileCacheUsage":         tileCacheUsageSchema,
 		"TileCacheStats":         tileCacheStatsSchema,
+		"TileCacheResourceUsage": tileCacheResourceUsageSchema,
+		"TileCacheResourceStats": tileCacheResourceStatsSchema,
 		"MosaicGranule":          mosaicGranuleSchema,
 		"MosaicHarvestGranule":   mosaicHarvestGranuleSchema,
 		"MosaicHarvestRequest":   mosaicHarvestRequestSchema,

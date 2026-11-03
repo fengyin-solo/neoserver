@@ -144,10 +144,40 @@ func (h *handler) workspaceTileCacheJob(w http.ResponseWriter, r *http.Request) 
 	return job, true
 }
 
+// tileCacheResourceStatsResponse carries the group_by=resource report alongside
+// the enabled/backend envelope shared with regular cache statistics.
+type tileCacheResourceStatsResponse struct {
+	Enabled bool   `json:"enabled"`
+	Backend string `json:"backend"`
+	GroupBy string `json:"group_by"`
+	tilecache.ResourceUsageReport
+}
+
 func (h *handler) getPersistentTileCacheStats(w http.ResponseWriter, r *http.Request) {
 	if h.tileCache == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 		return
+	}
+	query := r.URL.Query()
+	if groupBy := query.Get("group_by"); groupBy != "" && groupBy != "resource" {
+		writeError(w, http.StatusBadRequest, "Bad Request", "group_by must be 'resource'")
+		return
+	}
+	groupByResource := query.Get("group_by") == "resource"
+	if groupByResource && query.Get("resource") != "" {
+		writeError(w, http.StatusBadRequest, "Bad Request", "group_by=resource cannot be combined with resource")
+		return
+	}
+	limit := tilecache.DefaultResourceUsageLimit
+	if groupByResource {
+		if raw := query.Get("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > tilecache.MaxResourceUsageLimit {
+				writeError(w, http.StatusBadRequest, "Bad Request", "limit must be an integer between 1 and 1000")
+				return
+			}
+			limit = parsed
+		}
 	}
 	workspaceID, err := h.resolveWorkspaceIDForSettings(r.Context(), chi.URLParam(r, "workspace"))
 	if err != nil {
@@ -159,8 +189,34 @@ func (h *handler) getPersistentTileCacheStats(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "Internal Error", "failed to resolve workspace cache quota")
 		return
 	}
+	if groupByResource {
+		ws, ok := h.registry.GetByID(workspaceID)
+		if !ok {
+			writeError(w, http.StatusNotFound, "Not Found", "workspace not found")
+			return
+		}
+		resourceQuotas := map[string]int64{}
+		for _, layer := range ws.GetCatalogLayers() {
+			resourceQuotas[layer.ID] = layer.TileCacheQuotaBytes
+		}
+		for _, coverage := range ws.GetCatalogCoverages() {
+			resourceQuotas[coverage.ID] = coverage.TileCacheQuotaBytes
+		}
+		for _, group := range ws.GetAllLayerGroups() {
+			resourceQuotas[group.ID] = group.TileCacheQuotaBytes
+		}
+		report, err := h.tileCache.ResourceUsage(r.Context(), workspaceID, settings.Settings.PersistentCacheQuotaBytes, resourceQuotas, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal Error", "failed to read persistent cache resource usage")
+			return
+		}
+		writeJSON(w, http.StatusOK, tileCacheResourceStatsResponse{
+			Enabled: true, Backend: h.tileCache.BackendName(), GroupBy: "resource", ResourceUsageReport: report,
+		})
+		return
+	}
 	resourceID, resourceQuota := "", int64(0)
-	if identifier := r.URL.Query().Get("resource"); identifier != "" {
+	if identifier := query.Get("resource"); identifier != "" {
 		ws, ok := h.registry.GetByID(workspaceID)
 		if !ok {
 			writeError(w, http.StatusNotFound, "Not Found", "workspace not found")

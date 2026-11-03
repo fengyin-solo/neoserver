@@ -341,6 +341,33 @@ func (i *metadataIndex) usage(ctx context.Context, scopeType, scopeID string) (U
 	return usage, err
 }
 
+// resourceUsage aggregates cache_usage for every non-empty resource of one
+// workspace in a single query. Rows are ordered bytes descending, resource ID
+// ascending; at most limit rows are returned. The window count reports the
+// number of matching resources before truncation.
+func (i *metadataIndex) resourceUsage(ctx context.Context, workspaceID string, limit int) ([]ResourceUsage, int, error) {
+	prefix := workspaceID + ":"
+	rows, err := i.db.QueryContext(ctx, `SELECT substr(scope_id, ?), size_bytes, entry_count, count(*) OVER ()
+ FROM cache_usage
+ WHERE scope_type='resource' AND starts_with(scope_id, ?) AND entry_count > 0
+ ORDER BY size_bytes DESC, scope_id ASC
+ LIMIT ?`, len(prefix)+1, prefix, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	resources := make([]ResourceUsage, 0)
+	var total int64
+	for rows.Next() {
+		var item ResourceUsage
+		if err := rows.Scan(&item.ResourceID, &item.SizeBytes, &item.EntryCount, &total); err != nil {
+			return nil, 0, err
+		}
+		resources = append(resources, item)
+	}
+	return resources, int(total), rows.Err()
+}
+
 func (i *metadataIndex) lru(ctx context.Context, scopeType, workspaceID, resourceID, excludeKey string) (*Entry, error) {
 	query := `SELECT ` + entryColumns + ` FROM tile_entries WHERE state='ready' AND cache_key<>?`
 	args := []any{excludeKey}

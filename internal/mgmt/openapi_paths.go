@@ -998,9 +998,24 @@ func getPaths(params PathParams) *openapi3.Paths {
 		Put: &openapi3.Operation{Tags: []string{"Settings"}, Summary: "Update WMTS settings", OperationID: "updateWMTSSettings", Parameters: openapi3.Parameters{params.Workspace}, RequestBody: jsonBody("WMTS settings", &openapi3.SchemaRef{Ref: "#/components/schemas/WMTSSettings"}), Responses: mkResponses(map[string]*openapi3.ResponseRef{"200": jsonResp("Updated WMTS settings", &openapi3.SchemaRef{Ref: "#/components/schemas/WMTSSettings"}), "400": errResp(400, "Bad Request")})},
 	})
 
+	tileCacheGroupByParameter := &openapi3.ParameterRef{Value: &openapi3.Parameter{
+		In: "query", Name: "group_by", Description: "Aggregate usage by resource within the workspace",
+		Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema().WithEnum("resource")},
+	}}
+	tileCacheLimitParameter := &openapi3.ParameterRef{Value: &openapi3.Parameter{
+		In: "query", Name: "limit", Description: "Maximum resources to return when group_by=resource (1-1000, default 100)",
+		Schema: &openapi3.SchemaRef{Value: openapi3.NewIntegerSchema().WithMin(1).WithMax(1000).WithDefault(100)},
+	}}
+	tileCacheResourceParameter := &openapi3.ParameterRef{Value: &openapi3.Parameter{
+		In: "query", Name: "resource", Description: "Resource public identifier; cannot be combined with group_by=resource",
+		Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()},
+	}}
 	paths.Set("/workspaces/{workspace}/tile-cache/stats", &openapi3.PathItem{Get: &openapi3.Operation{
 		Tags: []string{"Tile Cache"}, Summary: "Get persistent tile cache usage", OperationID: "getPersistentTileCacheStats",
-		Parameters: openapi3.Parameters{params.Workspace}, Responses: mkResponses(map[string]*openapi3.ResponseRef{"200": jsonResp("Persistent tile cache statistics", &openapi3.SchemaRef{Ref: "#/components/schemas/TileCacheStats"})}),
+		Parameters: openapi3.Parameters{params.Workspace, tileCacheResourceParameter, tileCacheGroupByParameter, tileCacheLimitParameter},
+		Responses: mkResponses(map[string]*openapi3.ResponseRef{"200": jsonResp("Persistent tile cache statistics", &openapi3.SchemaRef{Value: &openapi3.Schema{OneOf: openapi3.SchemaRefs{
+			{Ref: "#/components/schemas/TileCacheStats"}, {Ref: "#/components/schemas/TileCacheResourceStats"},
+		}}}), "400": errResp(400, "Invalid query parameters")}),
 	}})
 	paths.Set("/workspaces/{workspace}/tile-cache/jobs", &openapi3.PathItem{
 		Get:  &openapi3.Operation{Tags: []string{"Tile Cache"}, Summary: "List tile cache jobs", OperationID: "listTileCacheJobs", Parameters: openapi3.Parameters{params.Workspace}, Responses: mkResponses(map[string]*openapi3.ResponseRef{"200": jsonResp("Tile cache jobs", &openapi3.SchemaRef{Value: &openapi3.Schema{Type: &openapi3.Types{"object"}, Properties: openapi3.Schemas{"jobs": {Value: &openapi3.Schema{Type: &openapi3.Types{"array"}, Items: &openapi3.SchemaRef{Ref: "#/components/schemas/TileCacheJob"}}}}}})})},
