@@ -282,6 +282,12 @@ func RegisterRoutes(r chi.Router, deps Dependencies) {
 					})
 				})
 
+				// WFS stored query management (read-only validation plus
+				// protocol-side CreateStoredQuery/DropStoredQuery).
+				r.Route("/wfs/stored-queries", func(r chi.Router) {
+					r.Post("/validate", h.validateWFSStoredQuery)
+				})
+
 				// Settings routes (per service type)
 				r.Route("/settings", func(r chi.Router) {
 					r.Route("/wms", func(r chi.Router) {

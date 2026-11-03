@@ -928,6 +928,24 @@ func getPaths(params PathParams) *openapi3.Paths {
 		},
 	})
 
+	paths.Set("/workspaces/{workspace}/wfs/stored-queries/validate", &openapi3.PathItem{
+		Post: &openapi3.Operation{
+			Tags:        []string{"WFS"},
+			Summary:     "Validate a WFS stored query definition",
+			Description: "Validates a structured WFS StoredQueryDefinition (id, parameters and QueryExpressionText) and returns every detected issue in stable order. This endpoint is read-only: it never creates, updates or deletes a stored query.",
+			OperationID: "validateWFSStoredQuery",
+			Parameters:  openapi3.Parameters{params.Workspace},
+			RequestBody: jsonBody("Stored query definition to validate", &openapi3.SchemaRef{Ref: "#/components/schemas/WFSStoredQueryDefinition"}),
+			Responses: mkResponses(map[string]*openapi3.ResponseRef{
+				"200": jsonResp("Validation result", &openapi3.SchemaRef{Ref: "#/components/schemas/WFSStoredQueryValidationResponse"}),
+				"400": errResp(400, "Bad Request"),
+				"401": errResp(401, "Unauthorized"),
+				"403": errResp(403, "Forbidden"),
+				"404": errResp(404, "Workspace not found"),
+			}),
+		},
+	})
+
 	paths.Set("/workspaces/{workspace}/settings/ogcapi", &openapi3.PathItem{
 		Get: &openapi3.Operation{
 			Tags:        []string{"Settings"},

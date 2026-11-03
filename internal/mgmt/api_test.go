@@ -19,13 +19,15 @@ import (
 
 // mockStore is a minimal mock implementation of store.Store for testing
 type mockStore struct {
-	workspaces    map[string]*store.Workspace
-	services      map[string]*store.Service
-	layers        map[string]*store.Layer
-	apiKeys       map[string]*store.APIKey
-	roles         map[string]*store.Role
-	claimMappings map[string]*store.ClaimRoleMapping
-	wmtsSettings  map[string]store.WMTSSettings
+	workspaces         map[string]*store.Workspace
+	services           map[string]*store.Service
+	layers             map[string]*store.Layer
+	apiKeys            map[string]*store.APIKey
+	roles              map[string]*store.Role
+	claimMappings      map[string]*store.ClaimRoleMapping
+	wmtsSettings       map[string]store.WMTSSettings
+	storedQueries      map[string]map[string]*store.WFSStoredQuery
+	storedQueryCreates int
 }
 
 func newMockStore() *mockStore {
@@ -37,6 +39,7 @@ func newMockStore() *mockStore {
 		roles:         make(map[string]*store.Role),
 		claimMappings: make(map[string]*store.ClaimRoleMapping),
 		wmtsSettings:  make(map[string]store.WMTSSettings),
+		storedQueries: make(map[string]map[string]*store.WFSStoredQuery),
 	}
 }
 
@@ -305,15 +308,48 @@ func (m *mockStore) UpdateStyle(ctx context.Context, id string, input store.Upda
 }
 func (m *mockStore) DeleteStyle(ctx context.Context, id string) error { return nil }
 func (m *mockStore) CreateWFSStoredQuery(ctx context.Context, input store.CreateWFSStoredQueryInput) (*store.WFSStoredQuery, error) {
-	return nil, nil
+	m.storedQueryCreates++
+	if m.storedQueries[input.WorkspaceID] == nil {
+		m.storedQueries[input.WorkspaceID] = make(map[string]*store.WFSStoredQuery)
+	}
+	if _, exists := m.storedQueries[input.WorkspaceID][input.QueryID]; exists {
+		return nil, store.ErrDuplicateKey
+	}
+	sq := &store.WFSStoredQuery{
+		ID:              "sq-" + input.QueryID,
+		WorkspaceID:     input.WorkspaceID,
+		QueryID:         input.QueryID,
+		Title:           input.Title,
+		Abstract:        input.Abstract,
+		Parameters:      append([]store.WFSStoredQueryParameter(nil), input.Parameters...),
+		QueryExpression: input.QueryExpression,
+		Language:        input.Language,
+		ReturnTypes:     append([]string(nil), input.ReturnTypes...),
+		CreatedAt:       time.Now(),
+	}
+	m.storedQueries[input.WorkspaceID][input.QueryID] = sq
+	return sq, nil
 }
 func (m *mockStore) GetWFSStoredQuery(ctx context.Context, workspaceID, queryID string) (*store.WFSStoredQuery, error) {
+	if queries, ok := m.storedQueries[workspaceID]; ok {
+		if sq, exists := queries[queryID]; exists {
+			return sq, nil
+		}
+	}
 	return nil, store.ErrNotFound
 }
 func (m *mockStore) ListWFSStoredQueries(ctx context.Context, workspaceID string) ([]*store.WFSStoredQuery, error) {
-	return nil, nil
+	var result []*store.WFSStoredQuery
+	for _, sq := range m.storedQueries[workspaceID] {
+		result = append(result, sq)
+	}
+	return result, nil
 }
 func (m *mockStore) DeleteWFSStoredQuery(ctx context.Context, workspaceID, queryID string) error {
+	if _, ok := m.storedQueries[workspaceID][queryID]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.storedQueries[workspaceID], queryID)
 	return nil
 }
 func (m *mockStore) GetWMSSettings(ctx context.Context, workspaceID string) (*store.WMSSettings, error) {
