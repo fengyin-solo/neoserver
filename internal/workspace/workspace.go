@@ -335,20 +335,32 @@ func (w *Workspace) GroupVisibleToRole(group *LayerGroup, role string) bool {
 	return w.groupVisibleToRole(group, role, make(map[string]bool), 0)
 }
 
-func (w *Workspace) groupVisibleToRole(group *LayerGroup, role string, visiting map[string]bool, depth int) bool {
-	if group == nil || !group.Enabled || depth > 32 || visiting[group.PublicID] {
+// GroupAccessibleToRole reports whether the caller may open the group itself,
+// independently of member-level restrictions. Portrayal that can filter members
+// per request (for example a merged group legend) uses this gate and then skips
+// individual members the role may not read, so mixed-visibility groups stay
+// usable without disclosing the hidden members.
+func (w *Workspace) GroupAccessibleToRole(group *LayerGroup, role string) bool {
+	return groupSelfAccessible(group, role)
+}
+
+func groupSelfAccessible(group *LayerGroup, role string) bool {
+	if group == nil || !group.Enabled {
 		return false
 	}
-	allowed := group.Public || role == "super_admin" || len(group.AllowedRoles) == 0
-	if !allowed {
-		for _, candidate := range group.AllowedRoles {
-			if candidate == role {
-				allowed = true
-				break
-			}
+	if group.Public || role == "super_admin" || len(group.AllowedRoles) == 0 {
+		return true
+	}
+	for _, candidate := range group.AllowedRoles {
+		if candidate == role {
+			return true
 		}
 	}
-	if !allowed {
+	return false
+}
+
+func (w *Workspace) groupVisibleToRole(group *LayerGroup, role string, visiting map[string]bool, depth int) bool {
+	if depth > 32 || visiting[group.PublicID] || !groupSelfAccessible(group, role) {
 		return false
 	}
 	visiting[group.PublicID] = true

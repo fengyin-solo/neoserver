@@ -1,7 +1,9 @@
 package wms
 
 import (
+	"context"
 	"fmt"
+	"image"
 	"image/color"
 	"image/png"
 	"net/http"
@@ -35,13 +37,9 @@ func (h *workspaceHandler) handleGetLegendGraphic(w http.ResponseWriter, r *http
 	// Find layer and service. A layer the caller may not read is treated as
 	// undefined so its existence is not disclosed.
 	resource := ws.GetResource(req.Layer)
-	if resource != nil && resource.Kind == workspace.ResourceGroup &&
-		ws.GroupVisibleToRole(resource.Group, workspaceRole(r, ws.ID)) {
-		// A group mixes member styles and geometry types, so it has no
-		// single legend symbol. Point clients at the members instead of
-		// claiming the layer is undefined.
-		WriteExceptionWithLocator(w, ExceptionInvalidParameterValue, "LAYER",
-			fmt.Sprintf("%s is a layer group; request a legend for each member layer", req.Layer))
+	role := workspaceRole(r, ws.ID)
+	if resource != nil && resource.Kind == workspace.ResourceGroup {
+		h.handleGroupGetLegendGraphic(w, r, ws, resource.Group, req, role)
 		return
 	}
 	if resource == nil || resource.Service == nil ||
@@ -132,19 +130,24 @@ func (h *workspaceHandler) handleGetLegendGraphic(w http.ResponseWriter, r *http
 	png.Encode(w, dc.Image())
 }
 
-// generateLegend generates a legend image for the given style.
-func (h *workspaceHandler) generateLegend(style *sld.Style, layerInfo *datasource.LayerInfo, symbolWidth, symbolHeight int) *gg.Context {
-	// Determine geometry type for symbol rendering
-	geomType := "Polygon"
+// legendGeometryType classifies a layer for legend symbol rendering using the
+// same point/line/polygon rules as map rendering.
+func legendGeometryType(layerInfo *datasource.LayerInfo) string {
 	geomTypeLower := strings.ToLower(layerInfo.GeometryType)
 	switch {
 	case strings.Contains(geomTypeLower, "point"):
-		geomType = "Point"
+		return "Point"
 	case strings.Contains(geomTypeLower, "line"):
-		geomType = "LineString"
-	case strings.Contains(geomTypeLower, "polygon"):
-		geomType = "Polygon"
+		return "LineString"
+	default:
+		return "Polygon"
 	}
+}
+
+// generateLegend generates a legend image for the given style.
+func (h *workspaceHandler) generateLegend(style *sld.Style, layerInfo *datasource.LayerInfo, symbolWidth, symbolHeight int) *gg.Context {
+	// Determine geometry type for symbol rendering
+	geomType := legendGeometryType(layerInfo)
 
 	// Create image with exact requested dimensions (required for WMS 1.3.0 compliance)
 	dc := gg.NewContext(symbolWidth, symbolHeight)
@@ -261,4 +264,248 @@ func minFloat(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// groupLegendError locates a failure within a layer group so the service
+// exception can identify the offending member instead of failing the request
+// anonymously.
+type groupLegendError struct {
+	code    string
+	message string
+}
+
+func (e *groupLegendError) Error() string { return e.message }
+
+// legendMember is one flattened, visible, de-duplicated group leaf in declared
+// top-to-bottom order.
+type legendMember struct {
+	resource  *workspace.PublishedResource
+	styleName string // effective stored/file style name; "" selects the resource default
+	path      []string
+}
+
+func (h *workspaceHandler) handleGroupGetLegendGraphic(w http.ResponseWriter, r *http.Request, ws *workspace.Workspace, group *workspace.LayerGroup, req *GetLegendGraphicRequest, role string) {
+	// A group the caller may not open is undefined, the same as a restricted
+	// layer, so private groups are not disclosed.
+	if !ws.GroupAccessibleToRole(group, role) {
+		WriteException(w, ExceptionLayerNotDefined, fmt.Sprintf("Layer not found: %s", req.Layer))
+		return
+	}
+	var inline *sld.StyledLayerDescriptor
+	if req.SLDBody != "" {
+		doc, err := sld.ParseString(req.SLDBody)
+		if err != nil {
+			WriteException(w, ExceptionStyleNotDefined, "Invalid SLD")
+			return
+		}
+		inline = doc
+	}
+	members, err := h.expandLegendGroup(ws, group, req.Style, role)
+	if err != nil {
+		WriteExceptionWithLocator(w, ExceptionInvalidParameterValue, "LAYER", err.Error())
+		return
+	}
+	// Every member's data and style is resolved before any response body is
+	// written, so a member failure can never produce a partial legend image.
+	img, err := h.renderGroupLegend(r.Context(), ws, members, inline, req.Environment, req.Width, req.Height)
+	if err != nil {
+		if failure, ok := err.(*groupLegendError); ok {
+			WriteExceptionWithLocator(w, failure.code, "LAYER", failure.message)
+			return
+		}
+		h.writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", FormatPNG)
+	w.WriteHeader(http.StatusOK)
+	_ = png.Encode(w, img)
+}
+
+// expandLegendGroup flattens a group depth-first in declared member order,
+// skipping resources the role may not read (including entire inaccessible
+// sub-groups) and drawing any given resource+style combination only once even
+// when it is reachable through several group paths. Style inheritance follows
+// the same rules as GetMap group expansion: a requested style or group default
+// overrides member-declared styles.
+func (h *workspaceHandler) expandLegendGroup(ws *workspace.Workspace, root *workspace.LayerGroup, requestedStyle, role string) ([]legendMember, error) {
+	maxDepth := h.cfg.WMS.MaxGroupDepth
+	if maxDepth <= 0 {
+		maxDepth = 8
+	}
+	members := make([]legendMember, 0)
+	seen := make(map[string]struct{})
+	visiting := make(map[string]bool)
+
+	var expand func(group *workspace.LayerGroup, inheritedStyle string, path []string, depth int) error
+	expand = func(group *workspace.LayerGroup, inheritedStyle string, path []string, depth int) error {
+		if depth > maxDepth {
+			return fmt.Errorf("layer group nesting exceeds %d", maxDepth)
+		}
+		if visiting[group.PublicID] {
+			return fmt.Errorf("layer group cycle includes %q", group.PublicID)
+		}
+		visiting[group.PublicID] = true
+		defer delete(visiting, group.PublicID)
+
+		groupStyle := inheritedStyle
+		if groupStyle == "" {
+			groupStyle = group.DefaultStyle
+		}
+		for _, declared := range group.Members {
+			memberPath := append(append([]string{}, path...), declared.Resource)
+			resource := ws.GetResource(declared.Resource)
+			if resource == nil {
+				// Disabled or removed after publication: there is nothing visible to show.
+				continue
+			}
+			styleName := declared.Style
+			if groupStyle != "" {
+				styleName = groupStyle
+			}
+			if resource.Kind == workspace.ResourceGroup {
+				// Skip the whole subtree when the nested group itself is not
+				// accessible; none of its member names or symbols may leak.
+				if !ws.GroupAccessibleToRole(resource.Group, role) {
+					continue
+				}
+				if err := expand(resource.Group, styleName, memberPath, depth+1); err != nil {
+					return err
+				}
+				continue
+			}
+			visible := false
+			switch resource.Kind {
+			case workspace.ResourceFeature:
+				visible = resource.Layer.VisibleToRole(role)
+			case workspace.ResourceCoverage:
+				visible = resource.Coverage.VisibleToRole(role)
+			}
+			if !visible {
+				continue
+			}
+			key := resource.PublicID() + "\x00" + canonicalLegendStyle(resource, styleName)
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			members = append(members, legendMember{resource: resource, styleName: styleName, path: memberPath})
+		}
+		return nil
+	}
+
+	if err := expand(root, requestedStyle, []string{root.PublicID}, 1); err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// canonicalLegendStyle identifies the style that would actually be rendered for
+// a member so default-style references de-duplicate against explicit ones.
+func canonicalLegendStyle(resource *workspace.PublishedResource, styleName string) string {
+	if styleName == "" || styleName == "default" {
+		if resource.Layer != nil {
+			return resource.Layer.DefaultStyle
+		}
+		if resource.Coverage != nil {
+			return resource.Coverage.DefaultStyle
+		}
+	}
+	return styleName
+}
+
+type preparedLegendMember struct {
+	path     []string
+	isRaster bool
+	raster   *sld.RasterStyle
+	geomType string
+	rule     *sld.ResolvedRule
+	hasRule  bool
+}
+
+// renderGroupLegend resolves every member first and then paints one merged PNG.
+// WIDTH/HEIGHT are the bounds of the whole result; members share the height in
+// equal vertical slices, in declared top-to-bottom order.
+func (h *workspaceHandler) renderGroupLegend(ctx context.Context, ws *workspace.Workspace, members []legendMember, inline *sld.StyledLayerDescriptor, environment map[string]string, width, height int) (image.Image, error) {
+	prepared := make([]preparedLegendMember, 0, len(members))
+	for _, member := range members {
+		ready, err := h.prepareLegendMember(ctx, ws, member, inline, environment)
+		if err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, ready)
+	}
+
+	dc := gg.NewContext(width, height)
+	dc.SetRGB(1, 1, 1)
+	dc.Clear()
+	count := len(prepared)
+	for index, member := range prepared {
+		top := index * height / count
+		bottom := (index + 1) * height / count
+		sliceHeight := bottom - top
+		if sliceHeight <= 0 {
+			continue
+		}
+		if member.isRaster {
+			dc.DrawImage(renderer.RasterLegend(member.raster, width, sliceHeight), 0, top)
+			continue
+		}
+		if member.hasRule {
+			h.drawLegendSymbol(dc, 0, float64(top), float64(width), float64(sliceHeight), member.geomType, member.rule)
+		}
+	}
+	return dc.Image(), nil
+}
+
+func (h *workspaceHandler) prepareLegendMember(ctx context.Context, ws *workspace.Workspace, member legendMember, inline *sld.StyledLayerDescriptor, environment map[string]string) (preparedLegendMember, error) {
+	fail := func(code string, cause error) (preparedLegendMember, error) {
+		groupName := ""
+		location := strings.Join(member.path, "/")
+		if len(member.path) > 0 {
+			groupName = member.path[0]
+		}
+		return preparedLegendMember{path: member.path}, &groupLegendError{
+			code:    code,
+			message: fmt.Sprintf("layer group %q member %q: %v", groupName, location, cause),
+		}
+	}
+	resource := member.resource
+	style, err := h.resolveWMSStyle(ws, resource, inline, member.styleName)
+	if err != nil {
+		return fail(ExceptionStyleNotDefined, err)
+	}
+	if resource.Kind == workspace.ResourceCoverage {
+		raster, err := h.resolveRasterLegendStyle(ws, style, environment)
+		if err != nil {
+			return fail(ExceptionStyleNotDefined, err)
+		}
+		return preparedLegendMember{path: member.path, isRaster: true, raster: raster}, nil
+	}
+	service := resource.Service
+	if service == nil || service.DataSource == nil {
+		return fail(ExceptionLayerNotDefined, fmt.Errorf("feature source is unavailable"))
+	}
+	layerInfo, err := resource.Layer.FeatureInfo(ctx, service.DataSource)
+	if err != nil {
+		return fail(ExceptionInvalidParameterValue, fmt.Errorf("failed to get layer info: %w", err))
+	}
+	if style == nil {
+		defaults := h.cfg.WMS.Styles[h.cfg.WMS.DefaultStyle]
+		if defaults.FillColor == "" {
+			defaults = conf.WMSStyle{
+				FillColor:   "#3388ff",
+				FillOpacity: 0.5,
+				StrokeColor: "#3388ff",
+				StrokeWidth: 2.0,
+				PointRadius: 5.0,
+			}
+		}
+		style = sld.DefaultStyle(defaults)
+	}
+	prepared := preparedLegendMember{path: member.path, geomType: legendGeometryType(layerInfo)}
+	if len(style.Rules) > 0 {
+		prepared.hasRule = true
+		prepared.rule = &style.Rules[0]
+	}
+	return prepared, nil
 }
